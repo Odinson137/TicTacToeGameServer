@@ -1,4 +1,3 @@
-using Game.Server.Data;
 using Game.Server.Interfaces;
 using Game.Server.Models;
 using Microsoft.AspNetCore.SignalR;
@@ -9,7 +8,8 @@ public class ServerHub : Hub
 {
     private readonly ILogger<ServerHub> _logger;
     private readonly IDataContext _dataContext;
-    private readonly Dictionary<int, GameInfo> playingGames = new();
+    private readonly Dictionary<int, GameInfo> _playingGames = new();
+    private readonly Dictionary<int, List<Move>> _gamesMoves = new();
 
     public ServerHub(ILogger<ServerHub> logger, IDataContext dataContext)
     {
@@ -53,20 +53,53 @@ public class ServerHub : Hub
         var creator = _dataContext.GetValue(titleGame);
         _dataContext.RemoveValue(titleGame);
         
-        playingGames[titleGame] = new GameInfo(creator.UserName, secondPlayerName);
+        _playingGames[titleGame] = new GameInfo(
+            creator.UserName, creator.ConnectionId,
+            secondPlayerName, Context.ConnectionId);
             
         await Clients.User(creator.ConnectionId).SendAsync("GameCreated", secondPlayerName);
         
+        await Clients.AllExcept(creator.ConnectionId).SendAsync("RemoveOpenGame", titleGame);
+        
         await Clients.Caller.SendAsync("GameEntered");
+
+        _gamesMoves[titleGame] = new List<Move>();
+        
+        await Clients.User(NextMoveGenerate(_playingGames[titleGame])).SendAsync("NextMove");
     }
 
-    public async Task HandleMove(int x, int y, int z)
+    private static string NextMoveGenerate(GameInfo gameInfo)
+        => new Random().Next(1, 2) == 1 ? gameInfo.FirstPlayerConnectionId : gameInfo.SecondPlayerConnectionId;
+
+    public async Task HandleMove(int gameTitle, string name, int x, int y, int z)
     {
         _logger.LogInformation("Handle move");
-        // TODO обработать порядок ходов
+
+        var gameMoves = _gamesMoves[gameTitle];
+
+        if (gameMoves.LastOrDefault()?.Name == name)
+        {
+            _logger.LogInformation("Игрок уже ходил на предыдущем ходу");
+
+            await Clients.Caller.SendAsync("ErrorMessage", "Вы уже ходили на предыдущем ходу!");
+            return;
+        }
+
+        if (IsMoveExist(gameMoves, x, y, z))
+        {
+            await Clients.Caller.SendAsync("ErrorMessage", "Данная клетка уже занята!");
+            return;            
+        }
+
+        var move = new Move(name, x, y, z);
+
+        gameMoves.Add(move);
     }
 
-    private async Task DisconnectWithError(string errorMessage)
+    private static bool IsMoveExist(IEnumerable<Move> moves, int x, int y, int z)
+         => moves.Any(c => c.X == x && c.Y == y && c.Z == z);
+
+    public async Task DisconnectWithError(string errorMessage)
     {
         _logger.LogError(errorMessage);
         await base.OnDisconnectedAsync(new HubException(errorMessage));
@@ -74,18 +107,14 @@ public class ServerHub : Hub
     
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        // var connectorJson = await _redis.StringGetAsync(GetConnectionId());
-        // if (!string.IsNullOrEmpty(connectorJson))
-        // {
-        //     var connector = JsonConvert.DeserializeObject<ConnecterDTO>(connectorJson!);
-        //     await _redis.KeyDeleteAsync(GetConnectionId());
-        //     var count = await _redis.StringDecrementAsync($"forumCount:{connector!.BookId}");
-        //     await Clients.All.SendAsync("UserCountMessage", count);
-        //     await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"group:{connector.BookId}");
-        // }
-
         _logger.LogWarning("DicConnected");
 
+        var gameTitle = _dataContext.DeleteInfoByConnectionId(Context.ConnectionId);
+
+        _playingGames.Remove(gameTitle);
+
+        _gamesMoves.Remove(gameTitle);
+        
         await base.OnDisconnectedAsync(exception);
     }
 }
