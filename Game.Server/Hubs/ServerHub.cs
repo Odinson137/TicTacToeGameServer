@@ -109,11 +109,16 @@ public class ServerHub : Hub
     {
         _logger.LogWarning("DicConnected");
 
-        var gameTitle = _dataContext.DeleteInfoByConnectionId(Context.ConnectionId);
+        _dataContext.DeleteInfoByConnectionId(Context.ConnectionId);
+        
+        var game = 
+            _playingGames.FirstOrDefault(c => 
+                c.Value.FirstPlayerConnectionId == Context.ConnectionId
+                || c.Value.SecondPlayerConnectionId == Context.ConnectionId);
+        
+        _playingGames.Remove(game.Key);
 
-        _playingGames.Remove(gameTitle);
-
-        _gamesMoves.Remove(gameTitle);
+        _gamesMoves.Remove(game.Key);
         
         await base.OnDisconnectedAsync(exception);
     }
