@@ -1,0 +1,11 @@
+{
+  "Version": 1,
+  "Hash": "ZiuzxVaqG+IypxOh+NK9u3fBrhrcMNbJZcCpMHSgYwc=",
+  "Source": "Game.Server",
+  "BasePath": "_content/Game.Server",
+  "Mode": "Default",
+  "ManifestType": "Build",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [],
+  "Assets": []
+}

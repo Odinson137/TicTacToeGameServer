@@ -1,3 +1,4 @@
+using System.Collections;
 using Game.Server.Interfaces;
 using Game.Server.Models;
 using Microsoft.AspNetCore.SignalR;
@@ -36,7 +37,7 @@ public class ServerHub : Hub
         return randomNumber;
     }
     
-    public async Task CreateGame(string firstPlayerName)
+    public async Task<int> CreateGame(string firstPlayerName)
     {
         _logger.LogInformation("Create game");
         var gameTitle = GenerateTitleGame();
@@ -44,7 +45,20 @@ public class ServerHub : Hub
         _dataContext.AddNewValue(gameTitle, new OpenGameInfo(Context.ConnectionId, firstPlayerName));
 
         await Clients.Caller.SendAsync("GetGameTitle", gameTitle);
+        
         await Clients.AllExcept(Context.ConnectionId).SendAsync("ShowNewGame", gameTitle, firstPlayerName);
+        
+        return gameTitle;
+    }
+    
+    public async Task<ICollection<OpenGame>> GetOpenGames()
+    {
+        _logger.LogInformation("Receive open games");
+        
+        var games = _dataContext.GetAllOpenGames();
+        
+        _logger.LogInformation("Received open games");
+        return games;
     }
 
     public async Task EnterGame(int titleGame, string secondPlayerName)
