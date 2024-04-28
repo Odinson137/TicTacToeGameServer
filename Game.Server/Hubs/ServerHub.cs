@@ -9,13 +9,15 @@ public class ServerHub : Hub
 {
     private readonly ILogger<ServerHub> _logger;
     private readonly IDataContext _dataContext;
-    private readonly Dictionary<int, GameInfo> _playingGames = new();
-    private readonly Dictionary<int, List<Move>> _gamesMoves = new();
+    private readonly Dictionary<int, GameInfo> _playingGames;
+    private readonly Dictionary<int, List<Move>> _gamesMoves;
 
     public ServerHub(ILogger<ServerHub> logger, IDataContext dataContext)
     {
         _logger = logger;
         _dataContext = dataContext;
+        _playingGames = dataContext.PlayingGames;
+        _gamesMoves = dataContext.GamesMoves;
     }
     
     public override async Task OnConnectedAsync()
@@ -71,15 +73,21 @@ public class ServerHub : Hub
             creator.UserName, creator.ConnectionId,
             secondPlayerName, Context.ConnectionId);
             
-        await Clients.User(creator.ConnectionId).SendAsync("GameCreated", secondPlayerName);
+        _logger.LogInformation($"{titleGame}");
+        _logger.LogInformation($"{creator.UserName} - {creator.ConnectionId}");
+        _logger.LogInformation($"{secondPlayerName} - {Context.ConnectionId}");
+        
+        _gamesMoves.Add(titleGame, new List<Move>());
+        
+        await Clients.Client(creator.ConnectionId).SendAsync("GameCreated", secondPlayerName);
         
         await Clients.AllExcept(creator.ConnectionId).SendAsync("RemoveOpenGame", titleGame);
         
         await Clients.Caller.SendAsync("GameEntered");
-
-        _gamesMoves[titleGame] = new List<Move>();
         
-        await Clients.User(NextMoveGenerate(_playingGames[titleGame])).SendAsync("NextMove");
+        var generate = NextMoveGenerate(_playingGames[titleGame]);
+        _logger.LogInformation($"Рандомный id - {generate}");
+        await Clients.Client(generate).SendAsync("NextMove");
     }
 
     private static string NextMoveGenerate(GameInfo gameInfo)
@@ -88,16 +96,24 @@ public class ServerHub : Hub
     public async Task HandleMove(int gameTitle, string name, int x, int y, int z)
     {
         _logger.LogInformation("Handle move");
+        _logger.LogInformation(gameTitle.ToString());
+        _logger.LogInformation(name);
+        _logger.LogInformation($"{x} - {y} - {z}");
 
+        foreach (var keyValuePair in _gamesMoves)
+        {
+            _logger.LogInformation($"{keyValuePair.Key} - {keyValuePair.Value}");
+        }
+        
         var gameMoves = _gamesMoves[gameTitle];
 
-        if (gameMoves.LastOrDefault()?.Name == name)
-        {
-            _logger.LogInformation("Игрок уже ходил на предыдущем ходу");
-
-            await Clients.Caller.SendAsync("ErrorMessage", "Вы уже ходили на предыдущем ходу!");
-            return;
-        }
+        // if (gameMoves.LastOrDefault()?.Name == name)
+        // {
+        //     _logger.LogInformation("Игрок уже ходил на предыдущем ходу");
+        //
+        //     await Clients.Caller.SendAsync("ErrorMessage", "Вы уже ходили на предыдущем ходу!");
+        //     return;
+        // }
 
         if (IsMoveExist(gameMoves, x, y, z))
         {
@@ -108,10 +124,35 @@ public class ServerHub : Hub
         var move = new Move(name, x, y, z);
 
         gameMoves.Add(move);
+
+        var game = _playingGames[gameTitle];
+        if (game.FirstPlayerConnectionId == Context.ConnectionId)
+        {
+            await Clients.Client(game.SecondPlayerConnectionId).SendAsync("OpponentMoveHandler", x, y, z);
+        }
+        else
+        {
+            await Clients.Client(game.FirstPlayerConnectionId).SendAsync("OpponentMoveHandler", x, y, z);
+        }
     }
 
     private static bool IsMoveExist(IEnumerable<Move> moves, int x, int y, int z)
          => moves.Any(c => c.X == x && c.Y == y && c.Z == z);
+
+    public async Task DisconnectGame(int gameTitle)
+    {
+        if (_playingGames[gameTitle].FirstPlayerConnectionId == Context.ConnectionId)
+        {
+            await Clients.Client(_playingGames[gameTitle].SecondPlayerConnectionId).SendAsync("OpponentLiveGame");
+        }
+        else
+        {
+            await Clients.Client(_playingGames[gameTitle].FirstPlayerConnectionId).SendAsync("OpponentLiveGame");
+        }
+        
+        _playingGames.Remove(gameTitle);
+        _gamesMoves.Remove(gameTitle);
+    }
 
     public async Task DisconnectWithError(string errorMessage)
     {
@@ -131,7 +172,7 @@ public class ServerHub : Hub
                 || c.Value.SecondPlayerConnectionId == Context.ConnectionId);
         
         _playingGames.Remove(game.Key);
-
+        
         _gamesMoves.Remove(game.Key);
         
         await base.OnDisconnectedAsync(exception);

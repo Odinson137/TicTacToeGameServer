@@ -6,6 +6,8 @@ namespace Game.Server.Data;
 public class DataContext : IDataContext
 {
     private readonly Dictionary<int, OpenGameInfo> _openGames = new();
+    public Dictionary<int, GameInfo> PlayingGames { get; } = new();
+    public Dictionary<int, List<Move>> GamesMoves { get; } = new();
 
     public void AddNewValue(int key, OpenGameInfo openGameInfo)
     {
